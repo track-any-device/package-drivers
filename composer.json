@@ -5,13 +5,31 @@
     "license": "MIT",
     "require": {
         "php": "^8.3",
-        "laravel/framework": "^13.7"
+        "laravel/framework": "^13.7",
+        "track-any-device/core": "*",
+        "track-any-device/sms-gateway": "^1.0"
     },
     "autoload": {
         "psr-4": {
             "TrackAnyDevice\\Drivers\\": "src/"
         }
     },
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../package-core",
+            "options": {
+                "symlink": true
+            }
+        },
+        {
+            "type": "path",
+            "url": "../package-sms-gateway",
+            "options": {
+                "symlink": true
+            }
+        }
+    ],
     "extra": {
         "laravel": {
             "providers": [
@@ -19,5 +37,6 @@
             ]
         }
     },
-    "minimum-stability": "stable"
+    "minimum-stability": "dev",
+    "prefer-stable": true
 }
