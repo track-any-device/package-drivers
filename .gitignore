@@ -1,0 +1,24 @@
+# Composer
+/vendor/
+composer.lock
+
+# PHPUnit / Pest
+/.phpunit.cache
+/coverage/
+.phpunit.result.cache
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Environment
+.env
+.env.*
+!.env.example

@@ -1,0 +1,23 @@
+{
+    "name": "track-any-device/drivers",
+    "description": "Device drivers and connectors for the Track Any Device platform.",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^13.7"
+    },
+    "autoload": {
+        "psr-4": {
+            "TrackAnyDevice\\Drivers\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "TrackAnyDevice\\Drivers\\DriversServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable"
+}
