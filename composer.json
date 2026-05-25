@@ -6,8 +6,8 @@
     "require": {
         "php": "^8.3",
         "laravel/framework": "^13.7",
-        "track-any-device/core": "^0.1.0",
-        "track-any-device/sms-gateway": "^1.0"
+        "track-any-device/core": "*",
+        "track-any-device/sms-gateway": "*"
     },
     "autoload": {
         "psr-4": {
