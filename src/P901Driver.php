@@ -271,6 +271,28 @@ class P901Driver implements DeviceDriverInterface
         $statusFlags = (int) ($event['status_flags'] ?? 0);
         $workingMode = WorkingMode::fromJt808Bits(($statusFlags >> 4) & 0b111)?->value;
 
+        $battery = isset($event['battery_level']) ? (int) $event['battery_level'] : null;
+        $battery ??= isset($event['battery_from_flags']) ? (int) $event['battery_from_flags'] : null;
+        $battery ??= isset($event['battery_percent']) ? (int) $event['battery_percent'] : null;
+
+        $signal = isset($event['signal_strength']) ? (int) $event['signal_strength'] : null;
+        $signal ??= isset($event['gsm_signal']) ? (int) $event['gsm_signal'] : null;
+
+        $deviceTime = $event['timestamp'] ?? $event['device_time'] ?? null;
+
+        $extra = [];
+        if (isset($event['acc_on'])) {
+            $extra['acc_on'] = (bool) $event['acc_on'];
+        }
+        if (isset($event['extras'])) {
+            $decoded = json_decode((string) $event['extras'], true);
+            if (is_array($decoded)) {
+                $extra = array_merge($extra, $decoded);
+            }
+        } elseif (is_array($event['extra'] ?? null)) {
+            $extra = array_merge($extra, $event['extra']);
+        }
+
         return new SignalObject(
             eventType: $this->jt808EventType($alarmFlags, $event['msg_id'] ?? null),
             source: SignalSource::StreamJt808,
@@ -281,8 +303,8 @@ class P901Driver implements DeviceDriverInterface
             direction: isset($event['direction']) ? (int) $event['direction'] : null,
             gpsFixed: ! empty($event['gps_fixed']),
             satellites: isset($event['satellites']) ? (int) $event['satellites'] : null,
-            batteryPercent: isset($event['battery_percent']) ? (int) $event['battery_percent'] : null,
-            gsmSignal: isset($event['gsm_signal']) ? (int) $event['gsm_signal'] : null,
+            batteryPercent: $battery,
+            gsmSignal: $signal,
             networkSignal: isset($event['network_signal']) ? (int) $event['network_signal'] : null,
             mcc: isset($event['mcc']) ? (int) $event['mcc'] : null,
             mnc: isset($event['mnc']) ? (int) $event['mnc'] : null,
@@ -292,9 +314,9 @@ class P901Driver implements DeviceDriverInterface
             alarmFlags: $alarmFlags,
             statusFlags: $statusFlags,
             rawPayload: $event['raw'] ?? null,
-            extra: (array) ($event['extra'] ?? []),
-            deviceTime: isset($event['device_time'])
-                ? CarbonImmutable::parse((string) $event['device_time'])->utc()
+            extra: $extra,
+            deviceTime: $deviceTime !== null
+                ? CarbonImmutable::parse((string) $deviceTime)->utc()
                 : null,
         );
     }
