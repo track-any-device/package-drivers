@@ -101,7 +101,9 @@ readonly class SignalObject
 
     public function hasLocation(): bool
     {
-        return $this->latitude !== null && $this->longitude !== null;
+        return $this->gpsFixed
+            && $this->latitude !== null
+            && $this->longitude !== null;
     }
 
     public function withServerTime(CarbonImmutable $time): self
