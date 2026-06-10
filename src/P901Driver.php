@@ -68,6 +68,7 @@ class P901Driver implements DeviceDriverInterface
             return;
         }
 
+        $this->queueSms('check', [], $device);
         $this->queueSms('query_location', [], $device);
     }
 
@@ -84,6 +85,7 @@ class P901Driver implements DeviceDriverInterface
             return;
         }
 
+        $this->queueSms('check', [], $device);
         $this->queueSms('set_mode', array_merge(['mode' => $mode], $params), $device);
     }
 
@@ -101,13 +103,21 @@ class P901Driver implements DeviceDriverInterface
         $tzOffset = (int) config('app.timezone_offset', 0);
 
         if ($masterNumber !== '') {
-            $this->queueSms('set_whitelist', ['number' => $masterNumber], $device);
+            foreach ($this->masterNumberVariants($masterNumber) as $variant) {
+                $this->queueSms('check', [], $device);
+                $this->queueSms('set_whitelist', ['number' => $variant], $device);
+            }
         }
 
+        $this->queueSms('check', [], $device);
         $this->queueSms('set_server', ['host' => $host, 'port' => $port], $device);
+        $this->queueSms('check', [], $device);
         $this->queueSms('set_apn', ['apn' => $apn], $device);
+        $this->queueSms('check', [], $device);
         $this->queueSms('set_timezone', ['offset' => $tzOffset], $device);
-        $this->queueSms('set_mode', ['mode' => 3, 'interval' => '30S'], $device);
+        $this->queueSms('check', [], $device);
+        $this->queueSms('set_mode', ['mode' => 3, 'interval' => '15M'], $device);
+        $this->queueSms('check', [], $device);
         $this->queueSms('check_firmware', [], $device);
     }
 
@@ -149,6 +159,7 @@ class P901Driver implements DeviceDriverInterface
             return;
         }
 
+        $this->queueSms('check', [], $device);
         $this->queueSms($commandName, $parameters, $device);
     }
 
@@ -218,6 +229,8 @@ class P901Driver implements DeviceDriverInterface
         $password = $params['password'] ?? '123456';
 
         return match ($commandType) {
+            'check' => "check{$password}",
+            'subcheck' => "subcheck{$password}",
             'set_apn' => "APN{$password} ".($params['apn'] ?? 'internet'),
             'set_server', 'set_ip' => "adminip{$password} ".($params['host'] ?? '').' '.($params['port'] ?? 7018),
             'set_timezone' => "timezone{$password} ".($params['offset'] ?? 0),
@@ -403,6 +416,22 @@ class P901Driver implements DeviceDriverInterface
         }
 
         return null;
+    }
+
+    /** @return string[] Both the +92… and 0… forms of a Pakistani mobile number, or the original if unrecognised. */
+    private function masterNumberVariants(string $number): array
+    {
+        $digits = preg_replace('/[^\d]/', '', $number);
+
+        if (str_starts_with($digits, '92') && strlen($digits) === 12) {
+            return ['+' . $digits, '0' . substr($digits, 2)];
+        }
+
+        if (str_starts_with($digits, '0') && strlen($digits) === 11) {
+            return ['+92' . substr($digits, 1), $digits];
+        }
+
+        return [$number];
     }
 
     private function extractTimestamp(string $raw): ?CarbonImmutable
