@@ -1,26 +1,23 @@
 name: Release
 
-# Fires on every push to main that isn't itself a release tag commit.
-# Infers the semver bump from conventional commit prefixes in the commits
-# since the last tag:
-#   feat! / BREAKING CHANGE  →  major
-#   feat                     →  minor
-#   everything else          →  patch
-#
-# Skip a release entirely by including [skip release] in a commit message.
-
 on:
   push:
-    branches:
-      - main
-
-permissions:
-  contents: write
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major]
 
 jobs:
   release:
-    name: Auto-bump & publish release
+    name: Tag & Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
@@ -28,102 +25,104 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve latest tag
-        id: current
+      - name: Determine bump type (push)
+        if: github.event_name == 'push'
+        id: detect
         run: |
-          TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-          echo "tag=${TAG:-v0.0.0}" >> "$GITHUB_OUTPUT"
-
-      - name: Collect commits since last tag
-        id: commits
-        run: |
-          FROM="${{ steps.current.outputs.tag }}"
-          if git rev-parse "$FROM" >/dev/null 2>&1; then
-            RANGE="${FROM}..HEAD"
+          # Collect commit messages since the last tag (or all commits if no tag yet)
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"%s" HEAD)
           else
-            RANGE="HEAD"
+            COMMITS=$(git log --pretty=format:"%s" "${LAST_TAG}..HEAD")
           fi
 
-          # Full messages (for breaking-change footer detection)
-          git log "$RANGE" --no-merges --format="%B" > /tmp/full_messages.txt
-
-          # One-line summaries (for changelog)
-          git log "$RANGE" --no-merges --format="- %s (%h)" > /tmp/changelog.txt
-
-          echo "range=${RANGE}" >> "$GITHUB_OUTPUT"
-
-      - name: Check for [skip release]
-        id: skip
-        run: |
-          if grep -qi '\[skip release\]' /tmp/full_messages.txt; then
+          if [ -z "$COMMITS" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
-      - name: Determine bump type
-        id: bump
-        if: steps.skip.outputs.skip == 'false'
-        run: |
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
           BUMP=patch
-
-          # Major: breaking-change footer OR feat! / fix! / refactor! prefix
-          if grep -qE '^BREAKING[- ]CHANGE' /tmp/full_messages.txt || \
-             grep -qE '^\w+(\(.+\))?!:' /tmp/full_messages.txt; then
-            BUMP=major
-          # Minor: any feat commit (non-breaking)
-          elif grep -qE '^feat(\(.+\))?:' /tmp/full_messages.txt; then
-            BUMP=minor
-          fi
+          while IFS= read -r msg; do
+            # BREAKING CHANGE footer or ! after type
+            if echo "$msg" | grep -qP '^[a-z]+(\(.+\))?!:' || echo "$msg" | grep -qi 'BREAKING CHANGE'; then
+              BUMP=major
+              break
+            fi
+            if echo "$msg" | grep -qP '^feat(\(.+\))?:'; then
+              BUMP=minor
+            fi
+          done <<< "$COMMITS"
 
           echo "bump=${BUMP}" >> "$GITHUB_OUTPUT"
 
+      - name: Set bump type (manual)
+        if: github.event_name == 'workflow_dispatch'
+        id: manual
+        run: |
+          echo "bump=${{ github.event.inputs.bump }}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if no new commits
+        if: |
+          (github.event_name == 'push'       && steps.detect.outputs.skip == 'true') ||
+          (github.event_name == 'workflow_dispatch' && steps.manual.outputs.skip == 'true')
+        run: |
+          echo "No new commits since last tag — skipping release."
+          exit 0
+
       - name: Compute next version
-        id: next
-        if: steps.skip.outputs.skip == 'false'
+        id: version
         run: |
-          CURRENT="${{ steps.current.outputs.tag }}"
-          VERSION="${CURRENT#v}"
+          BUMP=${{ github.event_name == 'push' && steps.detect.outputs.bump || steps.manual.outputs.bump }}
+
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          VERSION="${LAST_TAG#v}"
           IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-          case "${{ steps.bump.outputs.bump }}" in
-            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
-            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
-            patch) PATCH=$((PATCH + 1)) ;;
+
+          case "$BUMP" in
+            major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR+1)); PATCH=0 ;;
+            patch) PATCH=$((PATCH+1)) ;;
           esac
-          echo "version=v${MAJOR}.${MINOR}.${PATCH}" >> "$GITHUB_OUTPUT"
 
-      - name: Build release notes
-        id: notes
-        if: steps.skip.outputs.skip == 'false'
+          NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "tag=${NEW_TAG}" >> "$GITHUB_OUTPUT"
+          echo "previous_tag=${LAST_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Build changelog
+        id: changelog
         run: |
-          NEXT="${{ steps.next.outputs.version }}"
-          BUMP="${{ steps.bump.outputs.bump }}"
-          FROM="${{ steps.current.outputs.tag }}"
+          PREV="${{ steps.version.outputs.previous_tag }}"
+          if [ "$PREV" = "v0.0.0" ]; then
+            LOG=$(git log --pretty=format:"- %s (%h)" HEAD)
+          else
+            LOG=$(git log --pretty=format:"- %s (%h)" "${PREV}..HEAD")
+          fi
+          # Escape for GitHub output (multiline)
+          echo "log<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$LOG"     >> "$GITHUB_OUTPUT"
+          echo "EOF"      >> "$GITHUB_OUTPUT"
 
-          {
-            echo "body<<NOTES_EOF"
-            echo "## What's changed"
-            echo ""
-            cat /tmp/changelog.txt
-            echo ""
-            echo "---"
-            echo "_Bump type: \`${BUMP}\` · Previous tag: \`${FROM}\` → \`${NEXT}\`_"
-            echo "NOTES_EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Tag & push
-        if: steps.skip.outputs.skip == 'false'
+      - name: Create tag
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "${{ steps.next.outputs.version }}"
-          git push origin "${{ steps.next.outputs.version }}"
+          git tag -a "${{ steps.version.outputs.tag }}" \
+            -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
 
-      - name: Create GitHub release
-        if: steps.skip.outputs.skip == 'false'
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.next.outputs.version }}
-          name: ${{ steps.next.outputs.version }}
-          body: ${{ steps.notes.outputs.body }}
-          make_latest: true
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body: |
+            ## What's Changed
+
+            ${{ steps.changelog.outputs.log }}
+
+            **Full diff:** ${{ github.server_url }}/${{ github.repository }}/compare/${{ steps.version.outputs.previous_tag }}...${{ steps.version.outputs.tag }}
+          generate_release_notes: false
